@@ -20,10 +20,13 @@
  *   - All driver APIs live in their own .h/.c pair
  *   - NEVER call malloc – use the PMM you build in Lecture 11
  * ============================================================================*/
-
+#include "process.h"
 #include "vga.h"
 #include "keyboard.h"
 #include "../include/types.h"
+#include "idt.h"
+#include "timer.h"
+
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -159,6 +162,48 @@ static void cmd_mem(void) {
                    VGA_YELLOW, VGA_BLACK);
 }
 
+
+static const char *state_name(proc_state_t s) {
+    switch (s) {
+        case READY:      return "READY";
+        case RUNNING:    return "RUNNING";
+        case BLOCKED:    return "BLOCKED";
+        case TERMINATED: return "TERMINATED";
+    }
+    return "?";
+}
+
+
+static void cmd_ps(void) {
+    vga_puts_color("\n  PID  STATE\n", VGA_YELLOW, VGA_BLACK);
+    vga_puts("  -----------------\n");
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        pcb_t *p = process_get(i);
+        if (!p || p->state == TERMINATED) continue;
+        vga_puts("  ");
+        vga_printf("%d", p->pid);
+        vga_puts("    ");
+        vga_puts(state_name(p->state));
+        vga_puts("\n");
+    }
+    vga_puts("\n");
+}
+
+
+/*demo process*/
+static void demo_process_a(void) {
+    while (1) {
+        vga_write_status(0, "[Process A running]", VGA_LIGHT_CYAN, VGA_BLACK);
+        for (volatile int i = 0; i < 2000000; i++) { }
+    }
+}
+static void demo_process_b(void) {
+    while (1) {
+        vga_write_status(40, "[Process B running]", VGA_LIGHT_GREEN, VGA_BLACK);
+        for (volatile int i = 0; i < 2000000; i++) { }
+    }
+}
+
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -182,15 +227,14 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
         if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
-
+        if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
             continue;
         }
 
         /* Milestone stubs */
-        if (k_strcmp(cmd, "ps")      == 0 ||
-            k_strcmp(cmd, "kill")    == 0 ||
+        if (k_strcmp(cmd, "kill")    == 0 ||
             k_strcmp(cmd, "threads") == 0 ||
             k_strcmp(cmd, "free")    == 0 ||
             k_strcmp(cmd, "ls")      == 0 ||
@@ -213,6 +257,16 @@ static void shell_run(void) {
 void kernel_main(void) {
     vga_init();
     kb_init();
+    process_init();
+    idt_init();
+    timer_init(100);
+
+    process_create_current();
+    process_create(demo_process_a);
+    process_create(demo_process_b);
+
+    __asm__ __volatile__("sti");
+
     print_splash();
     shell_run();
 

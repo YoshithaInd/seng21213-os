@@ -40,19 +40,19 @@ static inline void vga_write_cell(int row, int col, char c, uint8_t attr) {
  * Scroll the screen up by one line when the cursor goes past row 24
  * --------------------------------------------------------------------------*/
 static void scroll_up(void) {
-    /* Move every row up by one */
     volatile uint16_t *vga = VGA_ADDR;
-    for (int r = 0; r < VGA_ROWS - 1; r++) {
+    /* Only scroll rows 0..(VGA_ROWS-2); the very last row is reserved
+     * for process status and is never touched by normal text output. */
+    for (int r = 0; r < VGA_ROWS - 2; r++) {
         for (int c = 0; c < VGA_COLS; c++) {
             vga[r * VGA_COLS + c] = vga[(r + 1) * VGA_COLS + c];
         }
     }
-    /* Blank the last row */
     uint16_t blank = (uint16_t)((cur_attr << 8) | ' ');
     for (int c = 0; c < VGA_COLS; c++) {
-        vga[(VGA_ROWS - 1) * VGA_COLS + c] = blank;
+        vga[(VGA_ROWS - 2) * VGA_COLS + c] = blank;
     }
-    cursor_row = VGA_ROWS - 1;
+    cursor_row = VGA_ROWS - 2;
 }
 
 /* ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ void vga_putchar(char c) {
         if (cursor_col >= VGA_COLS) { cursor_col = 0; cursor_row++; }
     }
 
-    if (cursor_row >= VGA_ROWS) scroll_up();
+   if (cursor_row >= VGA_ROWS - 1) scroll_up();
     update_hw_cursor();
 }
 
@@ -121,6 +121,8 @@ void vga_set_cursor(int row, int col) {
     cursor_col = (col < 0) ? 0 : (col >= VGA_COLS ? VGA_COLS - 1 : col);
     update_hw_cursor();
 }
+
+
 
 /* Minimal vga_printf: supports %s, %c, %d, %u, %x */
 static void print_uint(uint32_t n, int base) {
@@ -161,6 +163,17 @@ void vga_printf(const char *fmt, ...) {
     }
     __builtin_va_end(args);
 }
+/* Write text directly to the reserved status row, bypassing the normal
+ * scrolling cursor entirely — for fixed-position process status display. */
+void vga_write_status(int col, const char *str, vga_color_t fg, vga_color_t bg) {
+    uint8_t attr = (uint8_t)((bg << 4) | (fg & 0x0F));
+    int row = VGA_ROWS - 1;
+    while (*str) {
+        vga_write_cell(row, col, *str, attr);
+        str++;
+        col++;
+    }
+}
 
 /* Draw a box outline using IBM box-drawing characters (CP437) */
 void vga_draw_box(int row, int col, int height, int width, vga_color_t color) {
@@ -186,3 +199,4 @@ void vga_draw_box(int row, int col, int height, int width, vga_color_t color) {
 
     cur_attr = saved;
 }
+

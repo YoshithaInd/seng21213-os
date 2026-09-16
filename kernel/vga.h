@@ -49,6 +49,7 @@ void vga_puts(const char *str);
 void vga_puts_color(const char *str, vga_color_t fg, vga_color_t bg);
 void vga_set_cursor(int row, int col);
 void vga_printf(const char *fmt, ...);
+void vga_write_status(int col, const char *str, vga_color_t fg, vga_color_t bg);
 
 /* Student extension hook – implement in a later lecture */
 void vga_draw_box(int row, int col, int height, int width, vga_color_t color);
