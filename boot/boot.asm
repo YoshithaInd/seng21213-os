@@ -84,8 +84,11 @@ init_pm32:
     mov  fs, ax
     mov  gs, ax
 
-    ; Set up a proper kernel stack at 0x90000
-    mov  ebp, 0x90000
+    ; Set up a proper kernel stack well above the kernel + BSS region.
+    ; The 1 MB RAM disk (Stage 4) pushed BSS past the old 0x90000 stack
+    ; address, causing stack/data collision. (L12 )
+
+    mov  ebp, 0x400000
     mov  esp, ebp
 
     ; Jump to the kernel entry point (loaded at 0x10000)

@@ -40,7 +40,7 @@ seng21213-os/
 | L09 | ✅Process Management | `kernel/process.c`, `kernel/scheduler.c` |
 | L10 | ✅Threads & Synchronisation | `kernel/thread.c`, `kernel/mutex.c` |
 | L11 | ✅Memory Management | `kernel/pmm.c`, `kernel/vmm.c` |
-| L12 | File System | `kernel/fs.c`, `kernel/ramdisk.c` |
+| L12 | ✅File System | `kernel/fs.c`, `kernel/ramdisk.c` |
 
 ---
 
@@ -174,7 +174,29 @@ void   scheduler_tick(void);       /* Called by timer IRQ (Lecture 10) */
 - **`meminfo` command**: prints total / used / free physical frames and KB.
 - **`pmmtest` command**: allocates and frees 100 frames in a loop, verifying
   free-frame count matches before and after (no leaks).
-  
+
+
+  ### Stage 4 Details
+
+- **RAM disk** (`ramdisk.c`): a 1 MB fixed-size byte array in BSS, 256 blocks
+  of 4 KB each, exposed via `ramdisk_read()`/`ramdisk_write()`.
+- **On-disk layout**:
+  - Block 0 — superblock (magic number, block/inode counts)
+  - Block 1 — flat directory (128 entries of name + inode number)
+  - Block 2 — block bitmap (1 bit per 4 KB block)
+  - Block 3 — inode bitmap (1 bit per inode)
+  - Block 4 — inode table (32 inodes)
+  - Blocks 5–255 — file data
+- **Inodes**: 8 direct block pointers per file → 8 × 4 KB = 32 KB max file size.
+- **POSIX-style API** (`fs.c`): `fs_open()`, `fs_read()`, `fs_write()`,
+  `fs_close()`, `fs_unlink()`, plus `fs_seek()`/`fs_size()` to support
+  append-on-write.
+- **Shell commands**: `ls`, `touch <name>`, `cat <name>`, `write <name> <text>`
+  (appends), `rm <name>`.
+- **Bug fixed**: the 1 MB RAM disk's static BSS array pushed the kernel's data
+  segment past the old stack address (`0x90000`, set in Stage 0), causing the
+  stack and file system data to silently collide and crash. Fixed by moving
+  the kernel stack to `0x400000` in `boot.asm`.
 ---
 
 ## Debugging Tips

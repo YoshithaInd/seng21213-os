@@ -30,6 +30,7 @@
 #include "mutex.h"
 #include "semaphore.h"
 #include "pmm.h"
+#include "fs.h"
 
 
 /* ---------------------------------------------------------------------------
@@ -42,6 +43,11 @@ static void cmd_echo(const char *args);
 static void cmd_mem(void);
 static void cmd_race(void);
 static void cmd_pc(void);
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write_file(const char *args);
+static void cmd_rm(const char *args);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -355,6 +361,83 @@ static void demo_process_b(void) {
     }
 }
 
+
+
+/* ---------------------------------------------------------------------------
+ * Stage 4: RAM Disk File System commands (L12)
+ * --------------------------------------------------------------------------*/
+static void split_first_token(const char *s, char *tok, int toklen, const char **rest) {
+    int i = 0;
+    while (s[i] && s[i] != ' ' && i < toklen - 1) { tok[i] = s[i]; i++; }
+    tok[i] = '\0';
+    while (s[i] == ' ') i++;
+    *rest = &s[i];
+}
+
+static void cmd_ls(void) {
+    fs_dirent_t entries[32];
+    int n = fs_list(entries, 32);
+
+    vga_puts_color("\n  RAM Disk Files\n", VGA_YELLOW, VGA_BLACK);
+    vga_puts("  -----------------------------\n");
+    if (n == 0) { vga_puts("  (empty)\n\n"); return; }
+    for (int i = 0; i < n; i++) {
+        vga_puts("  "); vga_puts(entries[i].name);
+        vga_puts("    "); vga_printf("%d", entries[i].size); vga_puts(" bytes\n");
+    }
+    vga_puts("\n");
+}
+
+static void cmd_touch(const char *args) {
+    char name[28]; const char *rest;
+    split_first_token(args, name, sizeof(name), &rest);
+    if (name[0] == '\0') { vga_puts("  Usage: touch <name>\n"); return; }
+
+    int fd = fs_open(name, 1);
+    if (fd < 0) { vga_puts_color("  [ERROR] Could not create file\n", VGA_LIGHT_RED, VGA_BLACK); return; }
+    fs_close(fd);
+    vga_puts("  Created: "); vga_puts(name); vga_puts("\n");
+}
+
+static void cmd_cat(const char *args) {
+    char name[28]; const char *rest;
+    split_first_token(args, name, sizeof(name), &rest);
+    if (name[0] == '\0') { vga_puts("  Usage: cat <name>\n"); return; }
+
+    int fd = fs_open(name, 0);
+    if (fd < 0) { vga_puts_color("  [ERROR] File not found\n", VGA_LIGHT_RED, VGA_BLACK); return; }
+
+    static char buf[1024];
+    int n = fs_read(fd, buf, sizeof(buf) - 1);
+    fs_close(fd);
+    if (n < 0) n = 0;
+    buf[n] = '\0';
+    vga_puts("\n  "); vga_puts(buf); vga_puts("\n\n");
+}
+
+static void cmd_write_file(const char *args) {
+    char name[28]; const char *rest;
+    split_first_token(args, name, sizeof(name), &rest);
+    if (name[0] == '\0' || rest[0] == '\0') { vga_puts("  Usage: write <name> <text>\n"); return; }
+
+    int fd = fs_open(name, 1);
+    if (fd < 0) { vga_puts_color("  [ERROR] Could not open file\n", VGA_LIGHT_RED, VGA_BLACK); return; }
+
+    fs_seek(fd, fs_size(fd));   /* append, per the guide's spec */
+    fs_write(fd, rest, k_strlen(rest));
+    fs_close(fd);
+    vga_puts("  Appended to: "); vga_puts(name); vga_puts("\n");
+}
+
+static void cmd_rm(const char *args) {
+    char name[28]; const char *rest;
+    split_first_token(args, name, sizeof(name), &rest);
+    if (name[0] == '\0') { vga_puts("  Usage: rm <name>\n"); return; }
+
+    if (fs_unlink(name) == 0) { vga_puts("  Removed: "); vga_puts(name); vga_puts("\n"); }
+    else vga_puts_color("  [ERROR] File not found\n", VGA_LIGHT_RED, VGA_BLACK);
+}
+
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -386,6 +469,12 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "pc")   == 0) { cmd_pc();   continue; }
         if (k_strcmp(cmd, "meminfo") == 0) { cmd_meminfo(); continue; }
         if (k_strcmp(cmd, "pmmtest") == 0) { cmd_pmmtest(); continue; }
+        if (k_strcmp(cmd, "ls") == 0) { cmd_ls(); continue; }
+
+        if (k_strncmp(cmd, "touch ", 6) == 0) { cmd_touch(k_ltrim(cmd + 6));       continue; }
+        if (k_strncmp(cmd, "cat ",   4) == 0) { cmd_cat(k_ltrim(cmd + 4));         continue; }
+        if (k_strncmp(cmd, "write ", 6) == 0) { cmd_write_file(k_ltrim(cmd + 6));  continue; }
+        if (k_strncmp(cmd, "rm ",    3) == 0) { cmd_rm(k_ltrim(cmd + 3));          continue; }
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
             continue;
@@ -394,9 +483,7 @@ static void shell_run(void) {
         /* Milestone stubs */
         if (k_strcmp(cmd, "kill")    == 0 ||
             k_strcmp(cmd, "threads") == 0 ||
-            k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
-            k_strcmp(cmd, "cat")     == 0) {
+            k_strcmp(cmd, "free")    == 0 ) {
             vga_puts_color("  [TODO] This command is not yet implemented.\n",
                            VGA_YELLOW, VGA_BLACK);
             vga_puts("  Implement it as part of your lecture assignment.\n");
@@ -417,6 +504,7 @@ void kernel_main(void) {
     kb_init();
     process_init();
     pmm_init();
+    fs_init();
     idt_init();
     timer_init(100);
 
