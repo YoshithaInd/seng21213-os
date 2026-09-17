@@ -50,6 +50,7 @@ KERNEL_ASM_OBJ := build/kernel_entry.o
 ISR_ASM_SRC     := kernel/isr.asm
 ISR_ASM_OBJ     := build/isr.o
 
+
 KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/vga.c    \
                    kernel/keyboard.c    \
@@ -58,7 +59,8 @@ KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/timer.c    \
                    kernel/thread.c    \
                    kernel/mutex.c    \
-                   kernel/semaphore.c
+                   kernel/semaphore.c    \
+                   kernel/pmm.c
 
 # Add your new source files below as the course progresses:
 # Lecture 09: kernel/process.c kernel/scheduler.c

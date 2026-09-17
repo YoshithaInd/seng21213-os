@@ -39,7 +39,7 @@ seng21213-os/
 | L08 | ✅ Stage 0 – Boot + VGA + Shell | *Given to you* |
 | L09 | ✅Process Management | `kernel/process.c`, `kernel/scheduler.c` |
 | L10 | ✅Threads & Synchronisation | `kernel/thread.c`, `kernel/mutex.c` |
-| L11 | Memory Management | `kernel/pmm.c`, `kernel/vmm.c` |
+| L11 | ✅Memory Management | `kernel/pmm.c`, `kernel/vmm.c` |
 | L12 | File System | `kernel/fs.c`, `kernel/ramdisk.c` |
 
 ---
@@ -159,6 +159,22 @@ void   scheduler_tick(void);       /* Called by timer IRQ (Lecture 10) */
 - **`pc` command**: bounded-buffer producer-consumer using 3 semaphores (empty,
   full, mutex around the buffer). Runs to completion with no data corruption.
   Run `pc` at the shell to test.
+
+
+  ### Stage 3 Details
+
+- **E820 memory detection**: `boot/boot.asm` calls BIOS `int 0x15, EAX=0xE820` while
+  still in Real Mode (this data is unavailable once switched to Protected Mode),
+  storing the memory map at physical address `0x8000`.
+- **Bitmap frame allocator** (`pmm.c`): one bit per 4 KB physical page frame.
+  `pmm_init()` parses the E820 map, marking only "usable RAM" regions as free,
+  and force-reserves the first 1 MB (where the kernel itself lives) regardless
+  of what E820 reports.
+- **`pmm_alloc_frame()` / `pmm_free_frame()`**: first-fit bitmap scan / clear.
+- **`meminfo` command**: prints total / used / free physical frames and KB.
+- **`pmmtest` command**: allocates and frees 100 frames in a loop, verifying
+  free-frame count matches before and after (no leaks).
+  
 ---
 
 ## Debugging Tips

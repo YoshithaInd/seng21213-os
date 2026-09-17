@@ -9,6 +9,9 @@
 [BITS 16]           ; CPU starts in 16-bit Real Mode
 [ORG 0x7C00]        ; BIOS loads the MBR at this fixed address
 
+E820_COUNT  equ 0x8000   ; # of memory map entries goes here (4 bytes)
+E820_BUFFER equ 0x8004   ; entries themselves start here (24 bytes each)
+
 ; ---------------------------------------------------------------------------
 ; Entry: Real Mode setup
 ; ---------------------------------------------------------------------------
@@ -48,13 +51,16 @@ load_kernel:
     int  0x13
     jc   disk_error        ; Carry flag set = error
 
-    mov  si, msg_ok
+     mov  si, msg_ok
     call print_rm
+
+    call detect_memory     ; Must run in Real Mode — BIOS int 0x15 unavailable after this (L11 §1)
 
 ; ---------------------------------------------------------------------------
 ; Enter Protected Mode
 ; ---------------------------------------------------------------------------
 enter_pm:
+
     cli
     lgdt [gdt_descriptor]  ; Load the Global Descriptor Table
 
@@ -111,6 +117,39 @@ print_rm:
     int  0x10
     jmp  print_rm
 .done:
+    ret
+
+; ---------------------------------------------------------------------------
+; Subroutine: detect_memory – BIOS E820 memory map (L11 §1)
+; Fills E820_BUFFER with up to 32 entries, sets E820_COUNT. Must run
+; here, in Real Mode; int 0x15 is unavailable once in Protected Mode.
+; ---------------------------------------------------------------------------
+detect_memory:
+    pusha
+    xor  ax, ax
+    mov  es, ax           ; ES:DI must point at physical 0x8004, not
+                          ; wherever load_kernel left ES (0x1000) — that
+                          ; mismatch was the earlier bug. Safe to leave ES=0
+                          ; afterward since Protected Mode reloads it. (L11 §1)
+    mov  di, E820_BUFFER
+    xor  ebx, ebx
+    mov  dword [E820_COUNT], 0
+.e820_loop:
+    mov  eax, 0xE820
+    mov  edx, 0x534D4150     ; 'SMAP'
+    mov  ecx, 24
+    int  0x15
+    jc   .e820_done          ; carry set = unsupported or finished
+    cmp  eax, 0x534D4150
+    jne  .e820_done
+    inc  dword [E820_COUNT]
+    add  di, 24
+    cmp  dword [E820_COUNT], 32
+    jae  .e820_done
+    test ebx, ebx
+    jnz  .e820_loop           ; ebx = 0 means that was the last entry
+.e820_done:
+    popa
     ret
 
 ; ---------------------------------------------------------------------------

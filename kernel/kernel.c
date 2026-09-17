@@ -29,6 +29,7 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
+#include "pmm.h"
 
 
 /* ---------------------------------------------------------------------------
@@ -165,6 +166,43 @@ static void cmd_mem(void) {
     vga_puts("  0xB8000    – 0xBFFFF     :  VGA frame buffer\n");
     vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
                    VGA_YELLOW, VGA_BLACK);
+}
+
+static void cmd_meminfo(void) {
+    uint32_t total = pmm_total_frames();
+    uint32_t used  = pmm_used_frames();
+    uint32_t free  = pmm_free_frames();
+
+    vga_puts_color("\n  Physical Memory (PMM)\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  Total frames : "); vga_printf("%d", total); vga_puts("  ("); vga_printf("%d", total * 4); vga_puts(" KB)\n");
+    vga_puts("  Used frames  : "); vga_printf("%d", used);  vga_puts("  ("); vga_printf("%d", used * 4);  vga_puts(" KB)\n");
+    vga_puts("  Free frames  : "); vga_printf("%d", free);  vga_puts("  ("); vga_printf("%d", free * 4);  vga_puts(" KB)\n\n");
+}
+
+static void cmd_pmmtest(void) {
+    vga_puts_color("\n  PMM alloc/free test (100 frames)\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    uint32_t before_free = pmm_free_frames();
+
+    uint32_t frames[100];
+    int ok = 1;
+    for (int i = 0; i < 100; i++) {
+        frames[i] = pmm_alloc_frame();
+        if (frames[i] == 0) { ok = 0; break; }
+    }
+    for (int i = 0; i < 100; i++) {
+        if (frames[i]) pmm_free_frame(frames[i]);
+    }
+
+    uint32_t after_free = pmm_free_frames();
+
+    vga_puts("  Allocated 100 frames: "); vga_puts(ok ? "OK" : "FAILED (out of memory)");
+    vga_puts("\n  Free before: "); vga_printf("%d", before_free);
+    vga_puts("   Free after: ");  vga_printf("%d", after_free);
+    if (before_free == after_free)
+        vga_puts_color("  <-- MATCH, no leak\n\n", VGA_LIGHT_GREEN, VGA_BLACK);
+    else
+        vga_puts_color("  <-- MISMATCH, leak detected!\n\n", VGA_LIGHT_RED, VGA_BLACK);
 }
 
 
@@ -346,6 +384,8 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
         if (k_strcmp(cmd, "race") == 0) { cmd_race(); continue; }
         if (k_strcmp(cmd, "pc")   == 0) { cmd_pc();   continue; }
+        if (k_strcmp(cmd, "meminfo") == 0) { cmd_meminfo(); continue; }
+        if (k_strcmp(cmd, "pmmtest") == 0) { cmd_pmmtest(); continue; }
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
             continue;
@@ -376,6 +416,7 @@ void kernel_main(void) {
     vga_init();
     kb_init();
     process_init();
+    pmm_init();
     idt_init();
     timer_init(100);
 
