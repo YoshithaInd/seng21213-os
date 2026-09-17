@@ -76,6 +76,10 @@ pcb_t *process_create_current(void) {
     return p;
 }
 
+pcb_t *process_current(void) {
+    return current_process;
+}
+
 pcb_t *process_get(int index) {
     if (index < 0 || index >= MAX_PROCESSES) return 0;
     return &process_table[index];

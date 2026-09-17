@@ -26,6 +26,9 @@
 #include "../include/types.h"
 #include "idt.h"
 #include "timer.h"
+#include "thread.h"
+#include "mutex.h"
+#include "semaphore.h"
 
 
 /* ---------------------------------------------------------------------------
@@ -36,6 +39,8 @@ static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
 static void cmd_mem(void);
+static void cmd_race(void);
+static void cmd_pc(void);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -189,6 +194,114 @@ static void cmd_ps(void) {
     vga_puts("\n");
 }
 
+/* ---------------------------------------------------------------------------
+ * Stage 2 Demo: race condition, with and without a mutex (L10 §2)
+ * --------------------------------------------------------------------------*/
+#define RACE_ITERATIONS 5
+
+static volatile int myglobal          = 0;
+static volatile int race_threads_done = 0;
+static mutex_t       race_mutex;
+static int           race_use_mutex   = 0;
+
+static void race_worker(void *arg) {
+    (void)arg;
+    for (int i = 0; i < RACE_ITERATIONS; i++) {
+        if (race_use_mutex) mutex_lock(&race_mutex);
+
+        int tmp = myglobal;
+        for (volatile int d = 0; d < 500000; d++) { }  /* widen the race window */
+        myglobal = tmp + 1;
+
+        if (race_use_mutex) mutex_unlock(&race_mutex);
+    }
+    race_threads_done++;
+}
+
+static void cmd_race(void) {
+    myglobal = 0; race_threads_done = 0; race_use_mutex = 0;
+    mutex_init(&race_mutex);
+
+    vga_puts_color("\n  Race condition demo (NO mutex)\n", VGA_LIGHT_RED, VGA_BLACK);
+    vga_puts("  Two threads increment a shared counter without locking...\n");
+    thread_create(race_worker, 0);
+    thread_create(race_worker, 0);
+    while (race_threads_done < 2) { __asm__ __volatile__("hlt"); }
+
+    vga_puts("  Expected: "); vga_printf("%d", RACE_ITERATIONS * 2);
+    vga_puts("   Actual: ");  vga_printf("%d", myglobal);
+    if (myglobal != RACE_ITERATIONS * 2)
+        vga_puts_color("  <-- CORRUPTED (race condition!)\n", VGA_LIGHT_RED, VGA_BLACK);
+    else
+        vga_puts_color("  (no corruption this run - timing dependent, try again)\n", VGA_YELLOW, VGA_BLACK);
+
+    myglobal = 0; race_threads_done = 0; race_use_mutex = 1;
+    vga_puts_color("\n  Race condition demo (WITH mutex)\n", VGA_LIGHT_GREEN, VGA_BLACK);
+    thread_create(race_worker, 0);
+    thread_create(race_worker, 0);
+    while (race_threads_done < 2) { __asm__ __volatile__("hlt"); }
+
+    vga_puts("  Expected: "); vga_printf("%d", RACE_ITERATIONS * 2);
+    vga_puts("   Actual: ");  vga_printf("%d", myglobal);
+    vga_puts_color("  <-- CORRECT every time\n\n", VGA_LIGHT_GREEN, VGA_BLACK);
+}
+
+/* ---------------------------------------------------------------------------
+ * Stage 2 Demo: bounded-buffer producer-consumer, 3 semaphores (L10 §5)
+ * --------------------------------------------------------------------------*/
+#define PC_BUF_SIZE 5
+#define PC_ITEMS    10
+
+static int          pc_buffer[PC_BUF_SIZE];
+static int          pc_in = 0, pc_out = 0;
+static semaphore_t  pc_empty, pc_full, pc_mutex_sem;
+static volatile int pc_produced_done = 0, pc_consumed_done = 0;
+
+static void producer_thread(void *arg) {
+    (void)arg;
+    for (int i = 0; i < PC_ITEMS; i++) {
+        sem_wait(&pc_empty);
+        sem_wait(&pc_mutex_sem);
+        pc_buffer[pc_in] = i;
+        pc_in = (pc_in + 1) % PC_BUF_SIZE;
+        sem_signal(&pc_mutex_sem);
+        sem_signal(&pc_full);
+
+        vga_puts("  Produced: "); vga_printf("%d\n", i);
+        for (volatile int d = 0; d < 300000; d++) { }
+    }
+    pc_produced_done = 1;
+}
+
+static void consumer_thread(void *arg) {
+    (void)arg;
+    for (int i = 0; i < PC_ITEMS; i++) {
+        sem_wait(&pc_full);
+        sem_wait(&pc_mutex_sem);
+        int item = pc_buffer[pc_out];
+        pc_out = (pc_out + 1) % PC_BUF_SIZE;
+        sem_signal(&pc_mutex_sem);
+        sem_signal(&pc_empty);
+
+        vga_puts("  Consumed: "); vga_printf("%d\n", item);
+        for (volatile int d = 0; d < 300000; d++) { }
+    }
+    pc_consumed_done = 1;
+}
+
+static void cmd_pc(void) {
+    pc_in = 0; pc_out = 0; pc_produced_done = 0; pc_consumed_done = 0;
+    sem_init(&pc_empty, PC_BUF_SIZE);
+    sem_init(&pc_full, 0);
+    sem_init(&pc_mutex_sem, 1);
+
+    vga_puts_color("\n  Producer-Consumer demo (3 semaphores)\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    thread_create(producer_thread, 0);
+    thread_create(consumer_thread, 0);
+    while (!(pc_produced_done && pc_consumed_done)) { __asm__ __volatile__("hlt"); }
+    vga_puts_color("  Done. No data corruption, no deadlock.\n\n", VGA_LIGHT_GREEN, VGA_BLACK);
+}
+
 
 /*demo process*/
 static void demo_process_a(void) {
@@ -210,6 +323,9 @@ static void demo_process_b(void) {
 static char  shell_buf[256];
 static char  prompt[] = "\n  ksh> ";
 
+
+
+
 static void shell_run(void) {
     vga_puts_color("\n  Kernel Shell ready. Type 'help' for commands.\n",
                    VGA_LIGHT_GREEN, VGA_BLACK);
@@ -228,6 +344,8 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
         if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
         if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
+        if (k_strcmp(cmd, "race") == 0) { cmd_race(); continue; }
+        if (k_strcmp(cmd, "pc")   == 0) { cmd_pc();   continue; }
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
             continue;

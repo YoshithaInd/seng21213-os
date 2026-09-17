@@ -37,12 +37,13 @@ seng21213-os/
 | Lecture | Milestone | Files to Add |
 |---------|-----------|-------------|
 | L08 | ✅ Stage 0 – Boot + VGA + Shell | *Given to you* |
-| L09 | Process Management | `kernel/process.c`, `kernel/scheduler.c` |
-| L10 | Threads & Synchronisation | `kernel/thread.c`, `kernel/mutex.c` |
+| L09 | ✅Process Management | `kernel/process.c`, `kernel/scheduler.c` |
+| L10 | ✅Threads & Synchronisation | `kernel/thread.c`, `kernel/mutex.c` |
 | L11 | Memory Management | `kernel/pmm.c`, `kernel/vmm.c` |
 | L12 | File System | `kernel/fs.c`, `kernel/ramdisk.c` |
 
 ---
+
 
 ## Quick Start
 
@@ -143,7 +144,21 @@ void   process_yield(void);        /* Trigger context switch */
 void   process_exit(void);
 void   scheduler_tick(void);       /* Called by timer IRQ (Lecture 10) */
 ```
+### Stage 2 Details
 
+- **Threads**: `thread_create(fn, arg)` wraps `process_create()`, using a trampoline
+  function to support passing an argument.
+- **Mutex**: `mutex_t` with blocking `mutex_lock()`/`mutex_unlock()` — a thread that
+  cannot acquire the lock is set to `BLOCKED` and taken out of scheduling until
+  woken by `mutex_unlock()`.
+- **Semaphore**: counting `semaphore_t` with `sem_wait()`/`sem_signal()`, using the
+  same blocking mechanism.
+- **`race` command**: demonstrates a shared-counter race condition without a mutex
+  (visibly corrupts the result), then the same demo protected by a mutex (always
+  correct). Run `race` at the shell to test.
+- **`pc` command**: bounded-buffer producer-consumer using 3 semaphores (empty,
+  full, mutex around the buffer). Runs to completion with no data corruption.
+  Run `pc` at the shell to test.
 ---
 
 ## Debugging Tips
